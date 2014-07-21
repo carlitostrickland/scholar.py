@@ -326,7 +326,7 @@ class ScholarArticleParser(object):
                     tag.h3 and tag.h3.a:
                 self.article['title'] = ''.join(tag.h3.a.findAll(text=True))
                 self.article['url'] = self._path2url(tag.h3.a['href'])
-                if self.article['url'].endswith('.pdf'):
+                if self.article['url'].lower().endswith('.pdf'):
                     self.article['url_pdf'] = self.article['url']
 
             if tag.name == 'font':
@@ -437,7 +437,7 @@ class ScholarArticleParser120201(ScholarArticleParser):
             if tag.name == 'h3' and self._tag_has_class(tag, 'gs_rt') and tag.a:
                 self.article['title'] = ''.join(tag.a.findAll(text=True))
                 self.article['url'] = self._path2url(tag.a['href'])
-                if self.article['url'].endswith('.pdf'):
+                if self.article['url'].lower().endswith('.pdf'):
                     self.article['url_pdf'] = self.article['url']
 
             if tag.name == 'div' and self._tag_has_class(tag, 'gs_a'):
@@ -490,7 +490,7 @@ class ScholarArticleParser120726(ScholarArticleParser):
                     atag = tag.h3.a
                     self.article['title'] = ''.join(atag.findAll(text=True))
                     self.article['url'] = self._path2url(atag['href'])
-                    if self.article['url'].endswith('.pdf'):
+                    if self.article['url'].lower().endswith('.pdf'):
                         self.article['url_pdf'] = self.article['url']
                 except:
                     # Remove a few spans that have unneeded content (e.g. [CITATION])
@@ -576,6 +576,7 @@ class SearchScholarQuery(ScholarQuery):
         + '&as_publication=%(pub)s' \
         + '&as_ylo=%(ylo)s' \
         + '&as_yhi=%(yhi)s' \
+        + '&start=%(start_from)s' \
         + '&btnG=&hl=en&as_sdt=0,5&num=%(num)s'
 
     def __init__(self):
@@ -588,6 +589,7 @@ class SearchScholarQuery(ScholarQuery):
         self.author = None 
         self.pub = None
         self.timeframe = [None, None]
+        self.start_from = None
 
     def set_words(self, words):
         """Sets words that *all* must be found in the result."""
@@ -631,6 +633,10 @@ class SearchScholarQuery(ScholarQuery):
             end = ScholarUtils.ensure_int(end)
         self.timeframe = [start, end]
 
+    def set_start_from(self, start_from):
+        """Sets the starting result to return."""
+        self.start_from = str(int(start_from))
+
     def get_url(self):
         if self.words is None and self.words_some is None \
            and self.words_none is None and self.phrase is None \
@@ -647,6 +653,7 @@ class SearchScholarQuery(ScholarQuery):
                    'pub': self.pub or '',
                    'ylo': self.timeframe[0] or '',
                    'yhi': self.timeframe[1] or '',
+                   'start_from': self.start_from or '0',
                    'num': self.num_results or ScholarConf.MAX_PAGE_RESULTS}
 
         for key, val in urlargs.items():
@@ -805,8 +812,9 @@ class ScholarQuerier(object):
         """
         self.clear_articles()
         self.query = query
+        self.url = query.get_url()
 
-        html = self._get_http_response(url=query.get_url(),
+        html = self._get_http_response(url=self.url,
                                        log_msg='dump of query response HTML',
                                        err_msg='results retrieval failed')
         if html is None:
@@ -927,7 +935,12 @@ scholar.py -c 1 -C 17749203648027613321 --citation bt
 
 # Retrieve five articles written by Einstein after 1970 where the title
 # does not contain the words "quantum" and "theory":
-scholar.py -c 5 -a "albert einstein" -t --none "quantum theory" --after 1970"""
+scholar.py -c 5 -a "albert einstein" -t --none "quantum theory" --after 1970
+
+# Retrieve articles 11-31 with for the query "big data" with filetype pdf
+# and display the search url used:
+scholar.py -c 20 -f 10 --txt --all '"big data" filetype:pdf"
+"""
 
     fmt = optparse.IndentedHelpFormatter(max_help_position=50, width=100)
     parser = optparse.OptionParser(usage=usage, formatter=fmt)
@@ -953,6 +966,8 @@ scholar.py -c 5 -a "albert einstein" -t --none "quantum theory" --after 1970"""
                      help='Results must have appeared in or before given year')
     group.add_option('-C', '--cluster-id', metavar='CLUSTER_ID', default=None,
                      help='Do not search, just use articles in given cluster ID')
+    group.add_option('-f', '--start-from', type='int', default=0,
+                     help='Begin query from a starting position')
     group.add_option('-c', '--count', type='int', default=None,
                      help='Maximum number of results')
     parser.add_option_group(group)
@@ -967,6 +982,8 @@ scholar.py -c 5 -a "albert einstein" -t --none "quantum theory" --after 1970"""
                      help='Like --csv, but print header with column names')
     group.add_option('--citation', metavar='FORMAT', default=None,
                      help='Print article details in standard citation format. Argument Must be one of "bt" (BibTeX), "en" (EndNote), "rm" (RefMan), or "rw" (RefWorks).')
+    group.add_option('--print-url', action='store_true', default=False,
+                     help='Print query URL before output')
     parser.add_option_group(group)
 
     group = optparse.OptionGroup(parser, 'Miscellaneous')
@@ -1043,12 +1060,18 @@ scholar.py -c 5 -a "albert einstein" -t --none "quantum theory" --after 1970"""
             query.set_pub(options.pub)
         if options.after or options.before:
             query.set_timeframe(options.after, options.before)
+        if options.start_from:
+            query.set_start_from(options.start_from)
 
     if options.count is not None:
         options.count = min(options.count, ScholarConf.MAX_PAGE_RESULTS)
         query.set_num_page_results(options.count)
 
     querier.send_query(query)
+
+    if options.print_url:
+        query_url = "%s\n" %querier.url
+        print(encode(query_url))
 
     if options.csv:
         csv(querier)
